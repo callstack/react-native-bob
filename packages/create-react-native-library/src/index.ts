@@ -744,6 +744,7 @@ async function create(_argv: yargs.Arguments<any>) {
       arch,
       project: options.project,
       reactNativeVersion,
+      swift: options.project.swift,
     });
   }
 
