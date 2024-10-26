@@ -81,6 +81,8 @@ type ArgName =
   | 'languages'
   | 'type'
   | 'local'
+  | 'skip-git'
+  | 'replace-directory'
   | 'example'
   | 'react-native-version';
 
@@ -159,6 +161,11 @@ const EXAMPLE_CHOICES = [
     title: 'Expo',
     value: 'expo',
     description: 'managed expo project with web support',
+  },
+  {
+    title: 'None',
+    value: 'none',
+    description: 'no example app will be created',
   },
 ] as const;
 
@@ -253,6 +260,14 @@ const args: Record<ArgName, yargs.Options> = {
     type: 'string',
     choices: EXAMPLE_CHOICES.map(({ value }) => value),
   },
+  'skip-git': {
+    description: 'Skip git actions',
+    type: 'boolean',
+  },
+  'replace-directory': {
+    description: 'Replaces the directory if it already exists.',
+    type: 'boolean',
+  },
 };
 
 // FIXME: fix the type
@@ -319,7 +334,7 @@ async function create(_argv: yargs.Arguments<any>) {
     folder = path.join(process.cwd(), answers.folder);
   }
 
-  if (await fs.pathExists(folder)) {
+  if (!argv.replaceDirectory && (await fs.pathExists(folder))) {
     console.log(
       `A folder already exists at ${kleur.blue(
         folder
@@ -848,6 +863,7 @@ async function create(_argv: yargs.Arguments<any>) {
 
     try {
       isInGitRepo =
+        !argv.skipGit &&
         (await spawn('git', ['rev-parse', '--is-inside-work-tree'])) === 'true';
     } catch (e) {
       // Ignore error
@@ -933,12 +949,16 @@ async function create(_argv: yargs.Arguments<any>) {
     );
   } else {
     const platforms = {
-      ios: { name: 'iOS', color: 'cyan' },
-      android: { name: 'Android', color: 'green' },
+      ...(example === 'none'
+        ? {}
+        : {
+            ios: { name: 'iOS', colorize: kleur.cyan },
+            android: { name: 'Android', colorize: kleur.green },
+          }),
       ...(example === 'expo'
-        ? ({ web: { name: 'Web', color: 'blue' } } as const)
+        ? { web: { name: 'Web', colorize: kleur.blue } }
         : null),
-    } as const;
+    };
 
     console.log(
       dedent(`
@@ -949,8 +969,8 @@ async function create(_argv: yargs.Arguments<any>) {
         ${kleur.gray('$')} yarn
       ${Object.entries(platforms)
         .map(
-          ([script, { name, color }]) => `
-      ${kleur[color](`Run the example app on ${kleur.bold(name)}`)}${kleur.gray(
+          ([script, { name, colorize }]) => `
+      ${colorize(`Run the example app on ${kleur.bold(name)}`)}${kleur.gray(
         ':'
       )}
 
