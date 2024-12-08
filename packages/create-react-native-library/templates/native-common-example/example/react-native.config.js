@@ -1,7 +1,19 @@
 const path = require('path');
+<% if (example !== 'expo') { -%>
 const pkg = require('../package.json');
+<% } -%>
 <% if (example === 'test-app') { -%>
 const { configureProjects } = require('react-native-test-app');
+<% } -%>
+<% if (example === 'expo') { -%>
+
+// FIXME: `__dirname` is not set correctly in Expo
+// When building the, the cwc is `example/ios`
+// So we override `__dirname` based on that
+// https://github.com/expo/expo/pull/33532
+__dirname = path.resolve(process.cwd(), '..');
+
+const pkg = require(path.join(__dirname, '..', 'package.json'));
 <% } -%>
 
 module.exports = {
@@ -15,7 +27,7 @@ module.exports = {
       automaticPodsInstallation: true,
     },
   }),
-<% } else { -%>
+<% } else if (example === 'vanila') { -%>
   project: {
     ios: {
       automaticPodsInstallation: true,

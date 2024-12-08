@@ -88,11 +88,8 @@ async function create(_argv: yargs.Arguments<Args>) {
     spinner.text = 'Generating example app';
 
     await generateExampleApp({
-      type: config.example,
-      dest: folder,
-      arch: config.project.arch,
-      project: config.project,
-      bobVersion,
+      config,
+      destination: folder,
       reactNativeVersion: answers.reactNativeVersion,
     });
   }

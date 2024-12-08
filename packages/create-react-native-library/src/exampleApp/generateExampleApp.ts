@@ -3,7 +3,8 @@ import path from 'path';
 import https from 'https';
 import { spawn } from '../utils/spawn';
 import sortObjectKeys from '../utils/sortObjectKeys';
-import type { ExampleApp } from '../input';
+import dedent from 'dedent';
+import type { TemplateConfiguration } from '../template';
 
 const FILES_TO_DELETE = [
   '__tests__',
@@ -35,32 +36,26 @@ const PACKAGES_TO_REMOVE = [
   'typescript',
 ];
 
-const PACKAGES_TO_ADD_WEB = {
+const PACKAGES_TO_ADD_EXPO_WEB = {
   '@expo/metro-runtime': '~3.2.1',
   'react-dom': '18.2.0',
   'react-native-web': '~0.18.10',
 };
 
+const PACKAGES_TO_ADD_DEV_EXPO_NATIVE = {
+  'expo-dev-client': '~5.0.3',
+};
+
 export default async function generateExampleApp({
-  type,
-  dest,
-  arch,
-  project,
-  bobVersion,
+  config,
+  destination,
   reactNativeVersion = 'latest',
 }: {
-  type: ExampleApp;
-  dest: string;
-  arch: 'new' | 'legacy';
-  project: {
-    slug: string;
-    name: string;
-    package: string;
-  };
-  bobVersion: string;
-  reactNativeVersion?: string;
+  config: TemplateConfiguration;
+  destination: string;
+  reactNativeVersion: string | undefined;
 }) {
-  const directory = path.join(dest, 'example');
+  const directory = path.join(destination, 'example');
 
   // `npx --package react-native-test-app@latest init --name ${projectName}Example --destination example --version ${reactNativeVersion}`
   const testAppArgs = [
@@ -68,7 +63,7 @@ export default async function generateExampleApp({
     `react-native-test-app@latest`,
     'init',
     '--name',
-    `${project.name}Example`,
+    `${config.project.name}Example`,
     `--destination`,
     directory,
     ...(reactNativeVersion !== 'latest'
@@ -84,9 +79,9 @@ export default async function generateExampleApp({
   const vanillaArgs = [
     `@react-native-community/cli`,
     'init',
-    `${project.name}Example`,
+    `${config.project.name}Example`,
     '--package-name',
-    `${project.package}.example`,
+    `${config.project.package}.example`,
     '--directory',
     directory,
     '--version',
@@ -107,7 +102,7 @@ export default async function generateExampleApp({
 
   let args: string[] = [];
 
-  switch (type) {
+  switch (config.example) {
     case 'vanilla':
       args = vanillaArgs;
       break;
@@ -131,7 +126,7 @@ export default async function generateExampleApp({
   // Patch the example app's package.json
   const pkg = await fs.readJSON(path.join(directory, 'package.json'));
 
-  pkg.name = `${project.slug}-example`;
+  pkg.name = `${config.project.slug}-example`;
 
   // Remove Jest config for now
   delete pkg.jest;
@@ -144,12 +139,12 @@ export default async function generateExampleApp({
   const SCRIPTS_TO_ADD = {
     'build:android':
       'react-native build-android --extra-params "--no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a"',
-    'build:ios': `react-native build-ios --scheme ${project.name}Example --mode Debug --extra-params "-sdk iphonesimulator CC=clang CPLUSPLUS=clang++ LD=clang LDPLUSPLUS=clang++ GCC_OPTIMIZATION_LEVEL=0 GCC_PRECOMPILE_PREFIX_HEADER=YES ASSETCATALOG_COMPILER_OPTIMIZATION=time DEBUG_INFORMATION_FORMAT=dwarf COMPILER_INDEX_STORE_ENABLE=NO"`,
+    'build:ios': `react-native build-ios --scheme ${config.project.name}Example --mode Debug --extra-params "-sdk iphonesimulator CC=clang CPLUSPLUS=clang++ LD=clang LDPLUSPLUS=clang++ GCC_OPTIMIZATION_LEVEL=0 GCC_PRECOMPILE_PREFIX_HEADER=YES ASSETCATALOG_COMPILER_OPTIMIZATION=time DEBUG_INFORMATION_FORMAT=dwarf COMPILER_INDEX_STORE_ENABLE=NO"`,
   };
 
-  if (type === 'vanilla') {
+  if (config.example === 'vanilla') {
     Object.assign(scripts, SCRIPTS_TO_ADD);
-  } else if (type === 'test-app') {
+  } else if (config.example === 'test-app') {
     // `react-native-test-app` doesn't bundle application by default in 'Release' mode and also `bundle` command doesn't create a directory.
     // `mkdist` script should be removed after stable React Native major contains this fix: https://github.com/facebook/react-native/pull/45182.
 
@@ -173,9 +168,9 @@ export default async function generateExampleApp({
     const app = await fs.readJSON(path.join(directory, 'app.json'));
 
     app.android = app.android || {};
-    app.android.package = `${project.package}.example`;
+    app.android.package = `${config.project.package}.example`;
     app.ios = app.ios || {};
-    app.ios.bundleIdentifier = `${project.package}.example`;
+    app.ios.bundleIdentifier = `${config.project.package}.example`;
 
     await fs.writeJSON(path.join(directory, 'app.json'), app, {
       spaces: 2,
@@ -188,12 +183,12 @@ export default async function generateExampleApp({
   });
 
   const PACKAGES_TO_ADD_DEV = {
-    'react-native-builder-bob': `^${bobVersion}`,
+    'react-native-builder-bob': `^${config.bob.version}`,
   };
 
   Object.assign(devDependencies, PACKAGES_TO_ADD_DEV);
 
-  if (type === 'expo') {
+  if (config.example === 'expo') {
     const sdkVersion = dependencies.expo.split('.')[0].replace(/[^\d]/, '');
 
     let bundledNativeModules: Record<string, string>;
@@ -222,18 +217,43 @@ export default async function generateExampleApp({
       bundledNativeModules = {};
     }
 
-    Object.entries(PACKAGES_TO_ADD_WEB).forEach(([name, version]) => {
-      dependencies[name] = bundledNativeModules[name] || version;
-    });
+    if (config.project.native) {
+      Object.entries(PACKAGES_TO_ADD_DEV_EXPO_NATIVE).forEach(
+        ([name, version]) => {
+          devDependencies[name] = bundledNativeModules[name] || version;
+        }
+      );
 
-    scripts.web = 'expo start --web';
+      scripts.start = 'expo start --dev-client';
+      scripts.android = 'expo run:android';
+      scripts.ios = 'expo run:ios';
+
+      delete scripts.web;
+
+      await fs.writeFile(
+        path.join(directory, '.gitignore'),
+        dedent`
+        # These folders are generated with prebuild (CNG)
+        android/
+        ios/
+        `
+      );
+    } else {
+      Object.entries(PACKAGES_TO_ADD_EXPO_WEB).forEach(([name, version]) => {
+        dependencies[name] = bundledNativeModules[name] || version;
+      });
+
+      scripts.web = 'expo start --web';
+    }
 
     const app = await fs.readJSON(path.join(directory, 'app.json'));
 
+    app.expo.name = `${config.project.name} Example`;
+    app.expo.slug = `${config.project.slug}-example`;
     app.expo.android = app.expo.android || {};
-    app.expo.android.package = `${project.package}.example`;
+    app.expo.android.package = `${config.project.package}.example`;
     app.expo.ios = app.expo.ios || {};
-    app.expo.ios.bundleIdentifier = `${project.package}.example`;
+    app.expo.ios.bundleIdentifier = `${config.project.package}.example`;
 
     await fs.writeJSON(path.join(directory, 'app.json'), app, {
       spaces: 2,
@@ -250,7 +270,7 @@ export default async function generateExampleApp({
     spaces: 2,
   });
 
-  if (type !== 'expo') {
+  if (config.example !== 'expo') {
     let gradleProperties = await fs.readFile(
       path.join(directory, 'android', 'gradle.properties'),
       'utf8'
@@ -264,7 +284,7 @@ export default async function generateExampleApp({
     );
 
     // If the library is on new architecture, enable new arch for iOS and Android
-    if (arch === 'new') {
+    if (config.project.arch === 'new') {
       // iOS
       // Add ENV['RCT_NEW_ARCH_ENABLED'] = 1 on top of example/ios/Podfile
       const podfile = await fs.readFile(
