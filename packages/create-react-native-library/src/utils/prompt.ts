@@ -1,4 +1,4 @@
-import prompts from 'prompts';
+import prompts, { type Answers } from 'prompts';
 
 type Choice = {
   title: string;
@@ -14,7 +14,7 @@ export type Question<T extends string> = Omit<
   validate?: (value: string) => boolean | string;
   choices?:
     | Choice[]
-    | ((prev: unknown, values: Partial<prompts.Answers<T>>) => Choice[]);
+    | ((prev: unknown, values: Partial<Answers<T>>) => Choice[]);
 };
 
 /**
@@ -27,7 +27,7 @@ export type Question<T extends string> = Omit<
  */
 export async function prompt<T extends string>(
   questions: Question<T>[] | Question<T>,
-  argv?: Record<T, string>,
+  argv?: Answers<T>,
   options?: prompts.Options
 ) {
   const singleChoiceAnswers = {};
@@ -91,13 +91,47 @@ export async function prompt<T extends string>(
     promptQuestions.push(questions);
   }
 
-  const promptAnswers = await prompts(promptQuestions, {
-    onCancel() {
-      // Exit the CLI on cancel
+  let promptAnswers;
+
+  // TODO: negate
+  if (!process.stdin.isTTY) {
+    const missingQuestions = promptQuestions.reduce<string[]>(
+      (acc, question) => {
+        let type = question.type;
+
+        if (typeof question.type === 'function') {
+          // @ts-expect-error assume the passed value is correct
+          type = question.type(null, argv as Answers<T>, null);
+        }
+
+        if (type != null) {
+          acc.push(
+            question.name
+              .replace(/([A-Z]+)/g, '-$1')
+              .replace(/^-/, '')
+              .toLowerCase()
+          );
+        }
+
+        return acc;
+      },
+      []
+    );
+
+    if (missingQuestions.length) {
+      console.log('Missing arguments:', missingQuestions.join(', '));
+
       process.exit(1);
-    },
-    ...options,
-  });
+    }
+  } else {
+    promptAnswers = await prompts(promptQuestions, {
+      onCancel() {
+        // Exit the CLI on cancel
+        process.exit(1);
+      },
+      ...options,
+    });
+  }
 
   return {
     ...argv,

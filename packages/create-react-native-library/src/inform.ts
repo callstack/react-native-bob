@@ -105,8 +105,6 @@ export async function printNextSteps(
 }
 
 export function printErrorHelp(message: string, error: Error) {
-  console.log('\n');
-
   if (error) {
     console.log(kleur.red(error.message));
     throw error;
